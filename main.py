@@ -582,6 +582,61 @@ def print_snapshot(packages: HashTable, tmin: int) -> None:
             for pid, st in rows:
                 print(f"  Pkg {pid:>2}: {st}")
 
+def parse_user_time(s: str) -> Optional[int]:
+    """Accepts 'HH:MM' (24h) or 'H:MM AM/PM'. Returns minutes-from-8:00 or None."""
+    if not s:
+        return None
+    s = s.strip()
+    try:
+        # allow AM/PM
+        if s.lower().endswith(("am", "pm")):
+            return parse_clock(s)
+        # allow 24h HH:MM
+        hh, mm = s.split(":")
+        h = int(hh); m = int(mm)
+        return _to_minutes(BASE_DAY.replace(hour=h, minute=m))
+    except Exception:
+        return None
+
+def deadline_to_str(p: Package) -> str:
+    return "EOD" if p.deadline_min == EOD_MIN else fmt_time(p.deadline_min)
+
+def print_all_status(packages: HashTable, tmin: int) -> None:
+    """Show ALL packages with address, deadline, truck, and status at time tmin."""
+    print(f"\n=== All packages at {fmt_time(tmin)} ===")
+    print(f"{'ID':>3}  {'Address':35}  {'Deadline':8}  {'Truck':5}  Status")
+
+    ids = [pid for pid, _ in packages.items()]
+    ids.sort()
+
+    for pid in ids:
+        p = packages.get(pid)
+        if p is None:
+            continue
+        status = status_at_time(p, tmin)  # 'at the hub' | 'en route' | 'delivered at HH:MM'
+        # choose delivered truck if delivered by t, else the loaded truck
+        truck = p.truck_delivered if (p.time_delivered is not None and tmin >= p.time_delivered) else p.truck_loaded
+        truck_str = str(truck) if truck is not None else "-"
+        addr = f"{p.address}, {p.city} {p.zip}"
+        if len(addr) > 35:
+            addr = addr[:32] + "..."
+        print(f"{pid:>3}  {addr:35}  {deadline_to_str(p):8}  {truck_str:5}  {status}")
+
+def print_one_status(packages: HashTable, pid: int, tmin: int) -> None:
+    p = packages.get(pid)
+    if p is None:
+        print("No such package.")
+        return
+    status = status_at_time(p, tmin)
+    truck = p.truck_delivered if (p.time_delivered is not None and tmin >= p.time_delivered) else p.truck_loaded
+    truck_str = str(truck) if truck is not None else "-"
+    print(f"\nPackage {pid}: {status}")
+    print(f"Address:  {p.address}, {p.city} {p.zip}")
+    print(f"Deadline: {deadline_to_str(p)}")
+    print(f"Truck:    {truck_str}")
+    if p.time_delivered is not None and tmin >= p.time_delivered:
+        print(f"Delivered at: {fmt_time(p.time_delivered)}")
+
 
 # =============================
 # Simulation entry point
@@ -696,22 +751,38 @@ def run_simulation(pkg_csv: str, dist_csv: str) -> None:
         p = packages.get(pid)
         print(f"Pkg {pid}: {p.status}, delivered={fmt_time(p.time_delivered)}")
 
-    # Simple interactive snapshot loop to satisfy rubric D
+    # ===== Text UI (Requirement D) =====
     while True:
-        try:
-            s = input("Enter a time (24h HH:MM, e.g., 08:35) to view per-truck statuses, or press Enter to exit: ").strip()
-        except EOFError:
+        print("\n== WGUPS Menu ==")
+        print("1) View ALL packages at a time")
+        print("2) Look up a package at a time")
+        print("3) Exit")
+        choice = input("Choose 1-3: ").strip()
+
+        if choice == "1":
+            t = parse_user_time(input("Enter time (e.g., 09:45 or 9:45 AM): "))
+            if t is None:
+                print("Invalid time. Try again.")
+                continue
+            print_all_status(packages, t)
+            print(f"\nTotal miles (all trucks): {total_miles:.1f}")
+
+        elif choice == "2":
+            pid_s = input("Package ID (1-40): ").strip()
+            if not pid_s.isdigit():
+                print("Enter a numeric package ID.")
+                continue
+            t = parse_user_time(input("Enter time (e.g., 09:45 or 9:45 AM): "))
+            if t is None:
+                print("Invalid time. Try again.")
+                continue
+            print_one_status(packages, int(pid_s), t)
+            print(f"\nTotal miles (all trucks): {total_miles:.1f}")
+
+        elif choice == "3":
             break
-        if not s:
-            break
-        try:
-            hh, mm = s.split(":")
-            tmin = _to_minutes(BASE_DAY.replace(hour=int(hh), minute=int(mm)))
-        except Exception:
-            print("Please enter a valid time like 09:15")
-            continue
-        print_snapshot(packages, tmin)
-        print(f"\nTotal miles (all trucks): {total_miles:.1f}")
+        else:
+            print("Enter 1, 2, or 3.")
 
 
 if __name__ == "__main__":
